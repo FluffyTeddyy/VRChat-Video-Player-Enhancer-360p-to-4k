@@ -270,6 +270,8 @@ For non-YouTube links, the service briefly probes HTTP redirects (up to five
 hops, without downloading media). If any redirect target is YouTube, that URL
 is sent through the local HLS pipeline; links that stay elsewhere continue
 through normal yt-dlp passthrough.
+URLs that already point directly to an HLS playlist (`.m3u8`) are returned
+unchanged without redirect probing or additional yt-dlp arguments.
 
 The playlist is published as an HLS event while FFmpeg is running and ends with
 `#EXT-X-ENDLIST` when complete. FFmpeg atomically rewrites the same playlist as

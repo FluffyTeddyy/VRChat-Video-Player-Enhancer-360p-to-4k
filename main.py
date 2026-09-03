@@ -156,6 +156,15 @@ def is_youtube_url(reference: str) -> bool:
     )
 
 
+def is_hls_url(reference: str) -> bool:
+    """Return whether a URL directly identifies an HLS playlist."""
+    try:
+        parsed = urlparse(reference.strip())
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and parsed.path.lower().endswith(".m3u8")
+
+
 def _parse_vdf(text: str) -> dict[str, Any]:
     """Parse the quoted strings and objects used by Steam's library VDF."""
     tokens = re.findall(r'"((?:\\.|[^"\\])*)"|([{}])', text)
@@ -946,6 +955,8 @@ class YtDlpPassthrough:
     @staticmethod
     def follow_http_redirect(url: str) -> str | None:
         """Inspect a bounded chain of HTTP redirects without downloading media."""
+        if is_hls_url(url):
+            return None
         current_url = url
         seen = {current_url}
         opener = urllib.request.build_opener(_NoRedirectHandler())
@@ -998,6 +1009,10 @@ class YtDlpPassthrough:
         return None
 
     def __call__(self, url: str, *, avpro: bool, source: str) -> str:
+        if is_hls_url(url):
+            LOGGER.info("Passing through direct HLS URL unchanged: %s", url)
+            return url
+
         command = [str(self.executable), "--no-playlist"]
         if source == "resonite":
             command.append("--flat-playlist")
@@ -1451,7 +1466,11 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         source = source_values[0].lower()
 
         redirected_url: str | None = None
-        if not is_youtube_url(url) and self.server.passthrough is not None:
+        if (
+            not is_youtube_url(url)
+            and not is_hls_url(url)
+            and self.server.passthrough is not None
+        ):
             redirect_detector = getattr(self.server.passthrough, "follow_http_redirect", None)
             if callable(redirect_detector):
                 redirected_url = redirect_detector(url)
