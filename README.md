@@ -271,7 +271,10 @@ The playlist is published as an HLS event while FFmpeg is running and ends with
 new segments arrive; this is normal HLS polling behavior, not a new video for
 each segment. The local HLS endpoint waits briefly for the initial playlist so
 clients do not see a transient missing-file response. Completed videos are
-reused from the cache; stale partial output is replaced on the next request.
+reused from the cache; stale partial output is replaced on the next request. An
+active download is cancelled after 30 seconds without a playlist or segment
+request, which prevents videos that are no longer playing from continuing to
+download in the background.
 
 ## Configuration
 
@@ -287,17 +290,20 @@ All options are available with `python3 main.py --help` on Linux or
 | `--cache-max-size` (`--cache-limit`) | `10G` | Maximum cache size; accepts values such as `200M` or `10G` |
 | `--cache-grace-minutes` | `10` | Keep recently accessed completed entries protected |
 | `--cache-cleanup-interval` | `300` | Periodic cleanup interval in seconds; `0` disables it |
+| `--job-idle-timeout` | `30` | Cancel active downloads after this many seconds without HLS requests; `0` disables it |
 | `--cache-dir` | `./cache` | HLS output and cache metadata directory |
 | `--yt-dlp` | Linux: `~/.local/bin/yt-dlp` | Path to the `yt-dlp` executable |
 | `--ffmpeg` | Linux: `/usr/bin/ffmpeg` | Path to the FFmpeg executable |
 | `--cookies` | `./youtube_cookies.txt` | Optional Netscape-format cookie file; omitted when absent |
 | `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
-The cache size, grace period, and cleanup interval can also be set with
+The cache size, grace period, cleanup interval, and active-job timeout can also
+be set with
 `VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_MAX_SIZE`,
 `VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_GRACE_MINUTES`, and
-`VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_CLEANUP_INTERVAL` respectively. Inspect
-current cache usage at:
+`VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_CLEANUP_INTERVAL`, and
+`VRCHAT_VIDEO_PLAYER_ENHANCER_JOB_IDLE_TIMEOUT` respectively. Inspect current
+cache usage at:
 
 ```text
 http://127.0.0.1:9696/cache/status

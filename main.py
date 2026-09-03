@@ -37,6 +37,8 @@ DEFAULT_COOKIES = Path(__file__).parent / "youtube_cookies.txt"
 DEFAULT_CACHE_LIMIT_BYTES = 200 * 1024**2
 DEFAULT_CACHE_GRACE_SECONDS = 10 * 60
 DEFAULT_CACHE_CLEANUP_INTERVAL = 5 * 60
+DEFAULT_JOB_IDLE_TIMEOUT_SECONDS = 30.0
+DEFAULT_JOB_MONITOR_INTERVAL = 1.0
 HLS_PLAYLIST_WAIT_SECONDS = 10.0
 STATE_FILENAME = ".cache_state.json"
 VRCHAT_APP_ID = "438100"
@@ -44,6 +46,10 @@ VRCHAT_APP_ID = "438100"
 
 class ResolveError(RuntimeError):
     """An expected input or media-resolution failure."""
+
+
+class JobCancelled(RuntimeError):
+    """A remux job was stopped because no HLS client was still using it."""
 
 
 class ProcessLike(Protocol):
@@ -83,6 +89,8 @@ class Job:
     process: ProcessLike | None = None
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    last_hls_access: float = field(default_factory=time.monotonic)
+    cancel_requested: bool = False
     condition: threading.Condition = field(
         default_factory=lambda: threading.Condition(threading.Lock()), repr=False
     )
@@ -988,6 +996,8 @@ class JobManager:
         cache_limit_bytes: int = DEFAULT_CACHE_LIMIT_BYTES,
         cache_grace_seconds: float = DEFAULT_CACHE_GRACE_SECONDS,
         cache_cleanup_interval: float = DEFAULT_CACHE_CLEANUP_INTERVAL,
+        job_idle_timeout: float = DEFAULT_JOB_IDLE_TIMEOUT_SECONDS,
+        job_monitor_interval: float = DEFAULT_JOB_MONITOR_INTERVAL,
     ) -> None:
         self.cache_root = cache_root
         self.resolver = resolver
@@ -999,8 +1009,10 @@ class JobManager:
         self._stopping = threading.Event()
         self.cache = CacheStateStore(cache_root, cache_limit_bytes, cache_grace_seconds)
         self.cache_cleanup_interval = cache_cleanup_interval
+        self.job_idle_timeout = job_idle_timeout
+        self.job_monitor_interval = job_monitor_interval
         self._maintenance_thread: threading.Thread | None = None
-        if cache_cleanup_interval > 0:
+        if cache_cleanup_interval > 0 or job_idle_timeout > 0:
             self._maintenance_thread = threading.Thread(
                 target=self._maintenance_loop,
                 name="cache-maintenance",
@@ -1057,6 +1069,12 @@ class JobManager:
         return None
 
     def record_access(self, video_id: str) -> None:
+        with self._lock:
+            job = self._jobs.get(video_id)
+        if job:
+            with job.condition:
+                if job.state in ACTIVE_STATES:
+                    job.last_hls_access = time.monotonic()
         self.cache.touch(video_id)
 
     def cache_status(self) -> dict[str, Any]:
@@ -1069,17 +1087,60 @@ class JobManager:
         return self.cache.status(active_ids)
 
     def _maintenance_loop(self) -> None:
-        while not self._stopping.wait(self.cache_cleanup_interval):
+        next_cleanup = (
+            time.monotonic() + self.cache_cleanup_interval
+            if self.cache_cleanup_interval > 0
+            else None
+        )
+        while not self._stopping.wait(self._maintenance_wait(next_cleanup)):
+            now = time.monotonic()
             try:
-                with self._lock:
-                    active_ids = {
-                        video_id
-                        for video_id, job in self._jobs.items()
-                        if job.state in ACTIVE_STATES or job.process is not None
-                    }
-                self.cache.evict_if_needed(active_ids)
+                self._cancel_inactive_jobs(now)
+                if next_cleanup is not None and now >= next_cleanup:
+                    with self._lock:
+                        active_ids = {
+                            video_id
+                            for video_id, job in self._jobs.items()
+                            if job.state in ACTIVE_STATES or job.process is not None
+                        }
+                    self.cache.evict_if_needed(active_ids)
+                    next_cleanup = now + self.cache_cleanup_interval
             except Exception:
                 LOGGER.exception("Cache maintenance failed")
+
+    def _maintenance_wait(self, next_cleanup: float | None) -> float:
+        wait = self.job_monitor_interval if self.job_idle_timeout > 0 else float("inf")
+        if next_cleanup is not None:
+            wait = min(wait, max(0.0, next_cleanup - time.monotonic()))
+        return wait
+
+    def _cancel_inactive_jobs(self, now: float) -> None:
+        if self.job_idle_timeout <= 0 or self._stopping.is_set():
+            return
+        with self._lock:
+            jobs = list(self._jobs.values())
+        for job in jobs:
+            with job.condition:
+                if (
+                    job.state not in ACTIVE_STATES
+                    or job.cancel_requested
+                    or now - job.last_hls_access <= self.job_idle_timeout
+                ):
+                    continue
+                process = job.process
+                if process is not None and process.poll() is not None:
+                    continue
+                job.cancel_requested = True
+            LOGGER.info(
+                "Cancelling inactive HLS cache for %s (no request for %.1f seconds)",
+                job.video_id,
+                now - job.last_hls_access,
+            )
+            if process is not None:
+                try:
+                    process.terminate()
+                except OSError as exc:
+                    LOGGER.warning("Could not stop inactive HLS cache %s: %s", job.video_id, exc)
 
     def wait_until_available(self, job: Job, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -1122,6 +1183,9 @@ class JobManager:
             streams = self.resolver(job.video_id)
             if self._stopping.is_set():
                 raise ResolveError("Service is shutting down")
+            with job.condition:
+                if job.cancel_requested:
+                    raise JobCancelled
             self._set_state(
                 job,
                 "starting",
@@ -1132,7 +1196,13 @@ class JobManager:
             output_dir = job.playlist_path.parent
             self._clear_partial_output(output_dir)
             process = self.remuxer(streams, output_dir)
-            job.process = process
+            with job.condition:
+                job.process = process
+                cancelled = job.cancel_requested
+            if cancelled:
+                if process.poll() is None:
+                    process.terminate()
+                raise JobCancelled
             stderr_thread = threading.Thread(
                 target=self._drain_stderr,
                 args=(process, job.video_id),
@@ -1152,6 +1222,9 @@ class JobManager:
             stderr_thread.join(timeout=1)
             if self._stopping.is_set():
                 raise ResolveError("Service stopped before remuxing completed")
+            with job.condition:
+                if job.cancel_requested:
+                    raise JobCancelled
             if returncode != 0:
                 raise ResolveError(f"ffmpeg failed with exit code {returncode}")
             if not playlist_is_complete(job.playlist_path):
@@ -1162,12 +1235,22 @@ class JobManager:
             LOGGER.info("Completed HLS cache for %s", job.video_id)
         except Exception as exc:
             message = str(exc) or exc.__class__.__name__
-            self._set_state(job, "failed", error=message, finished_at=time.time())
-            self.cache.set_active(job.video_id, False)
-            self.cache.touch(job.video_id)
-            LOGGER.error("Job %s failed: %s", job.video_id, message)
+            with job.condition:
+                cancelled = isinstance(exc, JobCancelled) or job.cancel_requested
+            if cancelled and not self._stopping.is_set():
+                self._clear_partial_output(job.playlist_path.parent)
+                self._set_state(job, "cancelled", error=None, finished_at=time.time())
+                self.cache.set_active(job.video_id, False)
+                self.cache.touch(job.video_id)
+                LOGGER.info("Cancelled HLS cache for inactive video %s", job.video_id)
+            else:
+                self._set_state(job, "failed", error=message, finished_at=time.time())
+                self.cache.set_active(job.video_id, False)
+                self.cache.touch(job.video_id)
+                LOGGER.error("Job %s failed: %s", job.video_id, message)
         finally:
-            job.process = None
+            with job.condition:
+                job.process = None
             with self._lock:
                 self._workers.discard(threading.current_thread())
 
@@ -1542,6 +1625,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=float(os.environ.get("VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_CLEANUP_INTERVAL", "300")),
         help="periodic cleanup interval in seconds; zero disables periodic cleanup",
     )
+    parser.add_argument(
+        "--job-idle-timeout",
+        type=nonnegative_float,
+        default=float(os.environ.get("VRCHAT_VIDEO_PLAYER_ENHANCER_JOB_IDLE_TIMEOUT", "30")),
+        help="cancel active HLS jobs after this many seconds without a playlist/segment request; zero disables it",
+    )
     parser.add_argument("--cache-dir", type=Path, default=Path(__file__).parent / "cache")
     parser.add_argument("--yt-dlp", type=Path, default=DEFAULT_YTDLP)
     parser.add_argument("--ffmpeg", type=Path, default=DEFAULT_FFMPEG)
@@ -1644,6 +1733,7 @@ def main(argv: list[str] | None = None) -> int:
             cache_limit_bytes=args.cache_max_size,
             cache_grace_seconds=args.cache_grace_minutes * 60,
             cache_cleanup_interval=args.cache_cleanup_interval,
+            job_idle_timeout=args.job_idle_timeout,
         )
     except Exception as exc:
         LOGGER.error("Could not initialize cache manager: %s", exc)
