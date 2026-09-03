@@ -852,9 +852,11 @@ class YtDlpPassthrough:
     def __init__(
         self,
         executable: Path,
+        cookies: Path | None = None,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
         self.executable = executable
+        self.cookies = cookies
         self.run = run
 
     def __call__(self, url: str, *, avpro: bool, source: str) -> str:
@@ -863,16 +865,30 @@ class YtDlpPassthrough:
             command.append("--flat-playlist")
         if not avpro:
             command.extend(["--format", "best[protocol^=http]"])
-        command.extend(["--get-url", "--", url])
-        LOGGER.info("Passing through non-YouTube URL with command: %s", shlex.join(command))
-        try:
-            result = self.run(command, text=True, capture_output=True, check=False)
-        except OSError as exc:
-            raise ResolveError(f"Could not start passthrough yt-dlp: {exc}") from exc
+        with tempfile.TemporaryDirectory(prefix="vrchat-video-player-enhancer-passthrough-cookies-") as temporary_dir:
+            if self.cookies is not None and self.cookies.is_file():
+                cookie_path = Path(temporary_dir) / "cookies.txt"
+                try:
+                    shutil.copyfile(self.cookies, cookie_path)
+                except OSError as exc:
+                    raise ResolveError(f"Could not copy cookies file for passthrough yt-dlp: {exc}") from exc
+                command.extend(["--cookies", str(cookie_path)])
+            command.extend(["--get-url", "--", url])
+            LOGGER.info("Passing through non-YouTube URL with command: %s", shlex.join(command))
+            try:
+                result = self.run(command, text=True, capture_output=True, check=False)
+            except OSError as exc:
+                raise ResolveError(f"Could not start passthrough yt-dlp: {exc}") from exc
         if result.stderr.strip():
             LOGGER.warning("passthrough yt-dlp: %s", result.stderr.strip())
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "yt-dlp exited without output"
+            lowered = detail.lower()
+            if any(marker in lowered for marker in ("403", "401", "age-restricted", "age restricted", "sign in", "login", "cookie")):
+                detail += (
+                    " Cookies might be needed to access this video; export browser cookies "
+                    "to cookies.txt beside main.py and try again."
+                )
             raise ResolveError(f"yt-dlp passthrough failed (exit {result.returncode}): {detail}")
         output = result.stdout.strip()
         if not output:
@@ -1513,7 +1529,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     resolver = YtDlpResolver(args.yt_dlp, args.cookies, args.max_height)
-    passthrough = YtDlpPassthrough(args.yt_dlp)
+    passthrough = YtDlpPassthrough(args.yt_dlp, args.cookies)
     remuxer = FfmpegRemuxer(args.ffmpeg, args.segment_seconds)
     try:
         manager = JobManager(

@@ -3,6 +3,7 @@ __pycache__/
 cache/
 .vscode/
 youtube_cookies.txt
+test_main.py
 yt-dlp-stub/bin/
 yt-dlp-stub/obj/
 yt-dlp-stub/publish/
