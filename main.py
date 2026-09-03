@@ -404,9 +404,19 @@ def ensure_stub_executable(
 ) -> None:
     """Build the default Windows stub on demand without installing tooling."""
     stub = stub.resolve()
-    if stub.is_file():
+    is_default_stub = stub == DEFAULT_STUB.resolve()
+    project = Path(__file__).parent / "yt-dlp-stub" / "yt-dlp-stub.csproj"
+    source = project.with_name("Program.cs")
+    needs_build = not stub.is_file()
+    if stub.is_file() and is_default_stub and project.is_file() and source.is_file():
+        try:
+            stub_mtime = stub.stat().st_mtime_ns
+            needs_build = max(project.stat().st_mtime_ns, source.stat().st_mtime_ns) > stub_mtime
+        except OSError as exc:
+            raise ResolveError(f"Could not inspect stub timestamps: {exc}") from exc
+    if not needs_build:
         return
-    if stub != DEFAULT_STUB.resolve():
+    if not is_default_stub:
         raise ResolveError(f"Stub executable is missing or not a file: {stub}")
 
     dotnet = shutil.which("dotnet")
@@ -414,7 +424,6 @@ def ensure_stub_executable(
         raise ResolveError(
             f"Stub executable is missing and dotnet is unavailable to build it: {stub}"
         )
-    project = Path(__file__).parent / "yt-dlp-stub" / "yt-dlp-stub.csproj"
     if not project.is_file():
         raise ResolveError(f"Stub project is missing: {project}")
     command = [
@@ -429,7 +438,8 @@ def ensure_stub_executable(
         str(stub.parent),
         "--nologo",
     ]
-    LOGGER.info("Stub executable is missing; building it with: %s", shlex.join(command))
+    reason = "missing" if not stub.exists() else "out of date"
+    LOGGER.info("Stub executable is %s; building it with: %s", reason, shlex.join(command))
     try:
         result = run(command, text=True, capture_output=True, check=False)
     except OSError as exc:
