@@ -665,6 +665,40 @@ class CacheStateStore:
                 "videos": videos,
             }
 
+    def clear(self) -> int:
+        """Remove cached video directories and metadata for this service run."""
+        removed = 0
+        with self._lock:
+            try:
+                directories = list(self.cache_root.iterdir())
+            except (FileNotFoundError, OSError):
+                directories = []
+            for path in directories:
+                if not VIDEO_ID_RE.fullmatch(path.name):
+                    continue
+                try:
+                    if path.is_symlink():
+                        path.unlink()
+                        removed += 1
+                        continue
+                    if not path.is_dir():
+                        continue
+                    if path.resolve().parent != self.cache_root:
+                        LOGGER.warning("Skipping cache path outside root: %s", path)
+                        continue
+                    shutil.rmtree(path)
+                    removed += 1
+                except OSError as exc:
+                    LOGGER.warning("Could not remove cache video %s: %s", path.name, exc)
+            self._entries.clear()
+            for path in (self.state_path, self.state_path.with_name(self.state_path.name + ".tmp")):
+                try:
+                    if path.parent == self.cache_root:
+                        path.unlink(missing_ok=True)
+                except OSError as exc:
+                    LOGGER.warning("Could not remove cache metadata %s: %s", path, exc)
+        return removed
+
 
 class YtDlpResolver:
     def __init__(
@@ -1245,9 +1279,10 @@ class JobManager:
                 LOGGER.info("Cancelled HLS cache for inactive video %s", job.video_id)
             else:
                 self._set_state(job, "failed", error=message, finished_at=time.time())
-                self.cache.set_active(job.video_id, False)
-                self.cache.touch(job.video_id)
-                LOGGER.error("Job %s failed: %s", job.video_id, message)
+                if not self._stopping.is_set():
+                    self.cache.set_active(job.video_id, False)
+                    self.cache.touch(job.video_id)
+                    LOGGER.error("Job %s failed: %s", job.video_id, message)
         finally:
             with job.condition:
                 job.process = None
@@ -1275,6 +1310,8 @@ class JobManager:
             worker.join(timeout=max(0, deadline - time.monotonic()))
         if self._maintenance_thread:
             self._maintenance_thread.join(timeout=max(0, deadline - time.monotonic()))
+        removed = self.cache.clear()
+        LOGGER.info("Cleared %d cached video(s) on shutdown", removed)
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
