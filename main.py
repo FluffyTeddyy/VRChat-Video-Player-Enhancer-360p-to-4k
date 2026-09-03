@@ -831,7 +831,7 @@ class FfmpegRemuxer:
             "-hls_playlist_type",
             "event",
             "-hls_flags",
-            "append_list+temp_file",
+            "temp_file",
             "-hls_segment_filename",
             str(segment_pattern),
             str(playlist_path),
@@ -1488,8 +1488,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--startup-wait",
         type=nonnegative_float,
-        default=0.0,
-        help="optionally wait this many seconds for the first playlist (default: return immediately)",
+        default=10.0,
+        help="wait this many seconds for the first playlist (default: 10; use 0 to return immediately)",
     )
     parser.add_argument(
         "--cache-max-size",

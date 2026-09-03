@@ -190,8 +190,9 @@ curl --get \
 ```
 
 The response includes `playlist_url`, `status_url`, and a job `status`. With the
-default `--startup-wait 0`, a new job normally returns HTTP 202 while it starts.
-Poll the status URL until the status is `running` or `complete`:
+default `--startup-wait 10`, a new job waits briefly for the first playlist and
+returns HTTP 202 only if it is still starting. Poll the status URL until the
+status is `running` or `complete`:
 
 ```bash
 curl http://127.0.0.1:9696/status/VIDEO_ID
@@ -278,7 +279,7 @@ All options are available with `python3 main.py --help` on Linux or
 | `--port` | `9696` | Loopback HTTP port |
 | `--max-height` | `1080` | Maximum selected video height |
 | `--segment-seconds` | `6` | Steady-state HLS segment duration; the initial segment targets 1 second |
-| `--startup-wait` | `0` | Seconds to wait for the first playlist per resolve request |
+| `--startup-wait` | `10` | Seconds to wait for the first playlist per resolve request; use `0` to return immediately |
 | `--cache-max-size` (`--cache-limit`) | `10G` | Maximum cache size; accepts values such as `200M` or `10G` |
 | `--cache-grace-minutes` | `10` | Keep recently accessed completed entries protected |
 | `--cache-cleanup-interval` | `300` | Periodic cleanup interval in seconds; `0` disables it |
