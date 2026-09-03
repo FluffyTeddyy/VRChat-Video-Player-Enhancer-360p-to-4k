@@ -670,38 +670,34 @@ class YtDlpResolver:
         self.max_height = max_height
         self.run = run
 
-    def __call__(self, expected_video_id: str) -> DirectStreams:
+    def _resolve_once(
+        self,
+        expected_video_id: str,
+        cookie_path: Path | None,
+    ) -> DirectStreams:
         format_selector = (
             f"bestvideo[protocol^=http][vcodec^=avc1][height<={self.max_height}]"
             "+bestaudio[protocol^=http][acodec^=mp4a]"
         )
-        with tempfile.TemporaryDirectory(prefix="vrchat-video-player-enhancer-cookies-") as temporary_dir:
-            cookie_path: Path | None = None
-            if self.cookies is not None and self.cookies.is_file():
-                cookie_path = Path(temporary_dir) / "youtube_cookies.txt"
-                try:
-                    shutil.copyfile(self.cookies, cookie_path)
-                except OSError as exc:
-                    raise ResolveError(f"Could not copy cookies file for yt-dlp: {exc}") from exc
-            command = [
-                str(self.executable),
-                "--no-playlist",
-                "--match-filter",
-                "!is_live",
-                "--format",
-                format_selector,
-                "--dump-single-json",
-                "--no-warnings",
-                "--",
-                canonical_youtube_url(expected_video_id),
-            ]
-            if cookie_path is not None:
-                command[2:2] = ["--cookies", str(cookie_path)]
-            LOGGER.info("yt-dlp command: %s", shlex.join(command))
-            try:
-                result = self.run(command, text=True, capture_output=True, check=False)
-            except OSError as exc:
-                raise ResolveError(f"Could not start yt-dlp: {exc}") from exc
+        command = [
+            str(self.executable),
+            "--no-playlist",
+            "--match-filter",
+            "!is_live",
+            "--format",
+            format_selector,
+            "--dump-single-json",
+            "--no-warnings",
+            "--",
+            canonical_youtube_url(expected_video_id),
+        ]
+        if cookie_path is not None:
+            command[2:2] = ["--cookies", str(cookie_path)]
+        LOGGER.info("yt-dlp command: %s", shlex.join(command))
+        try:
+            result = self.run(command, text=True, capture_output=True, check=False)
+        except OSError as exc:
+            raise ResolveError(f"Could not start yt-dlp: {exc}") from exc
 
         if result.returncode != 0:
             detail = result.stderr.strip() or "yt-dlp exited without an error message"
@@ -760,6 +756,26 @@ class YtDlpResolver:
             video_headers=_safe_headers(video.get("http_headers")),
             audio_headers=_safe_headers(audio.get("http_headers")),
         )
+
+    def __call__(self, expected_video_id: str) -> DirectStreams:
+        with tempfile.TemporaryDirectory(prefix="vrchat-video-player-enhancer-cookies-") as temporary_dir:
+            cookie_path: Path | None = None
+            if self.cookies is not None and self.cookies.is_file():
+                cookie_path = Path(temporary_dir) / "youtube_cookies.txt"
+                try:
+                    shutil.copyfile(self.cookies, cookie_path)
+                except OSError as exc:
+                    raise ResolveError(f"Could not copy cookies file for yt-dlp: {exc}") from exc
+            try:
+                return self._resolve_once(expected_video_id, None)
+            except ResolveError as public_error:
+                if cookie_path is None:
+                    raise
+                LOGGER.info(
+                    "Public YouTube resolve failed; retrying with configured cookies: %s",
+                    public_error,
+                )
+                return self._resolve_once(expected_video_id, cookie_path)
 
 
 def _safe_headers(value: Any) -> dict[str, str]:

@@ -126,9 +126,10 @@ your installation.
 The service does not read a browser profile directly. Cookies are optional and
 are only needed for signed-in or otherwise restricted YouTube videos. When
 configured, the file must be in Netscape format.
-When a cookie file is configured, `yt-dlp` copies it to a temporary working
-location for each resolve; the source file is not modified. If the default
-cookie file does not exist, the service runs yt-dlp without cookies.
+The service first resolves videos without cookies because authenticated
+YouTube player URLs can be rejected by the media server even when extraction
+succeeds. If that public resolve fails and a cookie file is configured,
+`yt-dlp` retries with a temporary copy of it; the source file is not modified.
 
 Close the browser completely before exporting. A browser database that is still
 open can prevent `yt-dlp` from reading it.
