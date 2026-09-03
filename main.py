@@ -822,6 +822,8 @@ class FfmpegRemuxer:
             "hls",
             "-hls_segment_type",
             "mpegts",
+            "-hls_init_time",
+            "1",
             "-hls_time",
             str(self.segment_seconds),
             "-hls_list_size",

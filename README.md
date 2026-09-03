@@ -277,7 +277,7 @@ All options are available with `python3 main.py --help` on Linux or
 | --- | --- | --- |
 | `--port` | `9696` | Loopback HTTP port |
 | `--max-height` | `1080` | Maximum selected video height |
-| `--segment-seconds` | `6` | HLS segment duration |
+| `--segment-seconds` | `6` | Steady-state HLS segment duration; the initial segment targets 1 second |
 | `--startup-wait` | `0` | Seconds to wait for the first playlist per resolve request |
 | `--cache-max-size` (`--cache-limit`) | `10G` | Maximum cache size; accepts values such as `200M` or `10G` |
 | `--cache-grace-minutes` | `10` | Keep recently accessed completed entries protected |
