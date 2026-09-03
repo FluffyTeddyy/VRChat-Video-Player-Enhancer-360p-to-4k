@@ -1,6 +1,6 @@
 # VRChat Video Player Enhancer (From 360p up to 4k)
 
-VRChat Video Player Enhancer is a local HTTP service that turns a non-live
+VRChat Video Player Enhancer is a local HTTP service that turns a non-livestream
 YouTube video into a single HLS playlist. It asks `yt-dlp` for separate H.264
 video and AAC audio streams, remuxes them with FFmpeg without re-encoding, and
 serves the result from `127.0.0.1` for an HLS-capable client.
