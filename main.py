@@ -37,6 +37,7 @@ DEFAULT_COOKIES = Path(__file__).parent / "youtube_cookies.txt"
 DEFAULT_CACHE_LIMIT_BYTES = 200 * 1024**2
 DEFAULT_CACHE_GRACE_SECONDS = 10 * 60
 DEFAULT_CACHE_CLEANUP_INTERVAL = 5 * 60
+HLS_PLAYLIST_WAIT_SECONDS = 10.0
 STATE_FILENAME = ".cache_state.json"
 VRCHAT_APP_ID = "438100"
 
@@ -1391,6 +1392,20 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             return
         path = self.server.manager.cache_root / parts[0] / parts[1]
         self.server.manager.record_access(parts[0])
+        if parts[1] == "stream.m3u8" and not path.is_file():
+            deadline = time.monotonic() + HLS_PLAYLIST_WAIT_SECONDS
+            while time.monotonic() < deadline and not path.is_file():
+                job = self.server.manager.get(parts[0])
+                if not job or job.state not in ACTIVE_STATES:
+                    break
+                time.sleep(0.05)
+            if not path.is_file():
+                self._send_text(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "HLS playlist is not available yet; retry shortly\n",
+                    send_body,
+                )
+                return
         try:
             stat = path.stat()
             file_handle = path.open("rb")

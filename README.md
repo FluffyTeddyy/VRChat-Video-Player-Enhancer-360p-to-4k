@@ -267,8 +267,11 @@ is sent through the local HLS pipeline; links that stay elsewhere continue
 through normal yt-dlp passthrough.
 
 The playlist is published as an HLS event while FFmpeg is running and ends with
-`#EXT-X-ENDLIST` when complete. Completed videos are reused from the cache;
-stale partial output is replaced on the next request.
+`#EXT-X-ENDLIST` when complete. FFmpeg atomically rewrites the same playlist as
+new segments arrive; this is normal HLS polling behavior, not a new video for
+each segment. The local HLS endpoint waits briefly for the initial playlist so
+clients do not see a transient missing-file response. Completed videos are
+reused from the cache; stale partial output is replaced on the next request.
 
 ## Configuration
 
