@@ -264,14 +264,12 @@ Patching changes the VRChat installation. Do not run this at the same time as
 another tool that patches the same `yt-dlp.exe`; competing backups and restores
 can interfere with one another. Normal server startup
 keeps the patch active only for the service lifetime and reapplies it if VRChat
-refreshes its bundled executable during startup. The stub forwards YouTube requests to
-`/api/getvideo` and passes non-YouTube requests through the configured `yt-dlp`.
-For non-YouTube links, the service briefly probes HTTP redirects (up to five
-hops, without downloading media). If any redirect target is YouTube, that URL
-is sent through the local HLS pipeline; links that stay elsewhere continue
-through normal yt-dlp passthrough.
-URLs that already point directly to an HLS playlist (`.m3u8`) are returned
-unchanged without redirect probing or additional yt-dlp arguments.
+refreshes its bundled executable during startup. The stub has a strict
+YouTube-only gate: plain YouTube URLs are sent to `/api/getvideo`; every other
+request is delegated directly to VRChat's original `yt-dlp.exe.bkp` with its
+arguments unchanged. Non-YouTube requests therefore do not contact this
+service, run redirect probes, copy cookies, or receive format changes. Direct
+`.m3u8` URLs are part of that untouched normal path.
 
 The playlist is published as an HLS event while FFmpeg is running and ends with
 `#EXT-X-ENDLIST` when complete. FFmpeg atomically rewrites the same playlist as
