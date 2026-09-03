@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 cache/
 .vscode/
+youtube_cookies.txt
 yt-dlp-stub/bin/
 yt-dlp-stub/obj/
 yt-dlp-stub/publish/

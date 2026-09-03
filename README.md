@@ -64,7 +64,7 @@ your installation.
 
 4. Cookies are optional. If you need signed-in or restricted videos, export
    YouTube cookies as described in [Cookie setup](#cookie-setup). The Linux
-   default location is `~/.config/VRChatVideoPlayerEnhancer/youtube_cookies.txt`.
+   default location is `youtube_cookies.txt` beside `main.py`.
 
 5. Start the service from the repository directory:
 
@@ -104,8 +104,8 @@ your installation.
    is not used on Windows.
 
 5. Cookies are optional. For signed-in or restricted videos, export cookies as
-   described in [Cookie setup](#cookie-setup), choosing a Windows path such as
-   `C:\Users\YOUR_NAME\VRChatVideoPlayerEnhancer\youtube_cookies.txt`.
+   described in [Cookie setup](#cookie-setup), saving the file as
+   `youtube_cookies.txt` beside `main.py`.
 
 6. Start the service, passing the locations of the required external files:
 
@@ -115,7 +115,7 @@ your installation.
      --ffmpeg 'C:\ffmpeg\bin\ffmpeg.exe'
    ```
 
-   Add `--cookies "$env:USERPROFILE\VRChatVideoPlayerEnhancer\youtube_cookies.txt"`
+   Add `--cookies .\youtube_cookies.txt`
    when you have exported cookies.
 
    The cache is created as `cache\` beside `main.py` unless you set
@@ -141,10 +141,10 @@ YouTube URL that you can open while signed in; `--skip-download` prevents the
 export command from downloading the media.
 
 ```bash
-mkdir -p ~/.config/VRChatVideoPlayerEnhancer
+cd /path/to/VRChat-Video-Player-Enhancer-360p-to-4k
 ~/.local/bin/yt-dlp \
   --cookies-from-browser chrome \
-  --cookies ~/.config/VRChatVideoPlayerEnhancer/youtube_cookies.txt \
+  --cookies youtube_cookies.txt \
   --skip-download --no-playlist \
   'https://www.youtube.com/watch?v=VIDEO_ID'
 ```
@@ -157,10 +157,10 @@ For a non-default browser profile, use the profile syntax shown by
 Run this in PowerShell after closing the browser:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\VRChatVideoPlayerEnhancer" | Out-Null
+Set-Location 'C:\path\to\VRChat-Video-Player-Enhancer-360p-to-4k'
 & 'C:\Tools\yt-dlp\yt-dlp.exe' `
   --cookies-from-browser chrome `
-  --cookies "$env:USERPROFILE\VRChatVideoPlayerEnhancer\youtube_cookies.txt" `
+  --cookies .\youtube_cookies.txt `
   --skip-download --no-playlist `
   'https://www.youtube.com/watch?v=VIDEO_ID'
 ```
@@ -281,7 +281,7 @@ All options are available with `python3 main.py --help` on Linux or
 | `--cache-dir` | `./cache` | HLS output and cache metadata directory |
 | `--yt-dlp` | Linux: `~/.local/bin/yt-dlp` | Path to the `yt-dlp` executable |
 | `--ffmpeg` | Linux: `/usr/bin/ffmpeg` | Path to the FFmpeg executable |
-| `--cookies` | Linux: `~/.config/VRChatVideoPlayerEnhancer/youtube_cookies.txt` | Optional Netscape-format cookie file; omitted when absent |
+| `--cookies` | `./youtube_cookies.txt` | Optional Netscape-format cookie file; omitted when absent |
 | `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
 The cache size, grace period, and cleanup interval can also be set with
