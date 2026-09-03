@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+cache/
+.vscode/
+yt-dlp-stub/bin/
+yt-dlp-stub/obj/
+yt-dlp-stub/publish/
