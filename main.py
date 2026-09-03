@@ -707,10 +707,12 @@ class YtDlpResolver:
         cookies: Path | None,
         max_height: int,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        max_fps: int = 30,
     ) -> None:
         self.executable = executable
         self.cookies = cookies
         self.max_height = max_height
+        self.max_fps = max_fps
         self.run = run
 
     def _resolve_once(
@@ -720,6 +722,7 @@ class YtDlpResolver:
     ) -> DirectStreams:
         format_selector = (
             f"bestvideo[protocol^=http][vcodec^=avc1][height<={self.max_height}]"
+            f"[fps<={self.max_fps}]"
             "+bestaudio[protocol^=http][acodec^=mp4a]"
         )
         command = [
@@ -787,6 +790,15 @@ class YtDlpResolver:
 
         video_url = str(video["url"])
         audio_url = str(audio["url"])
+        LOGGER.info(
+            "Selected YouTube formats: video=%s height=%s fps=%s vbr=%sK audio=%s abr=%sK",
+            video.get("format_id") or "unknown",
+            video.get("height") or "unknown",
+            video.get("fps") or "unknown",
+            video.get("vbr") or video.get("tbr") or "unknown",
+            audio.get("format_id") or "unknown",
+            audio.get("abr") or audio.get("tbr") or "unknown",
+        )
         LOGGER.info("yt-dlp video URL: %s", video_url)
         LOGGER.info("yt-dlp audio URL: %s", audio_url)
         return DirectStreams(
@@ -1635,6 +1647,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--backup", type=Path, help="override the adjacent yt-dlp.exe.bkp backup path")
     parser.add_argument("--port", type=int, default=9696)
     parser.add_argument("--max-height", type=positive_int, default=1080)
+    parser.add_argument("--max-fps", type=positive_int, default=30)
     parser.add_argument("--segment-seconds", type=positive_int, default=6)
     parser.add_argument(
         "--startup-wait",
@@ -1759,7 +1772,12 @@ def main(argv: list[str] | None = None) -> int:
         restore_patch()
         return 2
 
-    resolver = YtDlpResolver(args.yt_dlp, args.cookies, args.max_height)
+    resolver = YtDlpResolver(
+        args.yt_dlp,
+        args.cookies,
+        args.max_height,
+        max_fps=args.max_fps,
+    )
     passthrough = YtDlpPassthrough(args.yt_dlp, args.cookies)
     remuxer = FfmpegRemuxer(args.ffmpeg, args.segment_seconds)
     try:

@@ -5,6 +5,10 @@ YouTube video into a single HLS playlist. It asks `yt-dlp` for separate H.264
 video and AAC audio streams, remuxes them with FFmpeg without re-encoding, and
 serves the result from `127.0.0.1` for an HLS-capable client.
 
+By default, the service selects the best available H.264 video at up to 1080p
+and 30 FPS. This avoids high-bitrate 60 FPS streams that may not download fast
+enough for uninterrupted playback. Both limits are configurable.
+
 The service is local-only and has no authentication. Do not expose its port to
 your network or the internet.
 
@@ -286,6 +290,7 @@ All options are available with `python3 main.py --help` on Linux or
 | --- | --- | --- |
 | `--port` | `9696` | Loopback HTTP port |
 | `--max-height` | `1080` | Maximum selected video height |
+| `--max-fps` | `30` | Maximum selected video frame rate |
 | `--segment-seconds` | `6` | Steady-state HLS segment duration; the initial segment targets 1 second |
 | `--startup-wait` | `10` | Seconds to wait for the first playlist per resolve request; use `0` to return immediately |
 | `--cache-max-size` (`--cache-limit`) | `10G` | Maximum cache size; accepts values such as `200M` or `10G` |
