@@ -63,8 +63,7 @@ your installation.
    chmod +x ~/.local/bin/yt-dlp
    ```
 
-   If you keep it somewhere else, use `--yt-dlp /path/to/yt-dlp` when starting
-   the service.
+   If you keep it somewhere else, set `yt_dlp` in `config.ini`.
 
 4. Cookies are optional. If you need signed-in or restricted videos, export
    YouTube cookies as described in [Cookie setup](#cookie-setup). The Linux
@@ -111,19 +110,21 @@ your installation.
    described in [Cookie setup](#cookie-setup), saving the file as
    `youtube_cookies.txt` beside `main.py`.
 
-6. Start the service, passing the locations of the required external files:
+6. Open `config.ini` and set the Windows paths for `yt_dlp` and `ffmpeg`:
 
-   ```powershell
-   py -3 .\main.py `
-     --yt-dlp 'C:\Tools\yt-dlp\yt-dlp.exe' `
-     --ffmpeg 'C:\ffmpeg\bin\ffmpeg.exe'
+   ```ini
+   yt_dlp = C:\Tools\yt-dlp\yt-dlp.exe
+   ffmpeg = C:\ffmpeg\bin\ffmpeg.exe
    ```
 
-   Add `--cookies .\youtube_cookies.txt`
-   when you have exported cookies.
+7. Start the service:
+
+   ```powershell
+   py -3 .\main.py
+   ```
 
    The cache is created as `cache\` beside `main.py` unless you set
-   `--cache-dir`.
+   `cache_dir` in `config.ini`.
 
 ## Cookie setup
 
@@ -283,11 +284,22 @@ download in the background.
 
 ## Configuration
 
-All options are available with `python3 main.py --help` on Linux or
-`py -3 .\main.py --help` on Windows.
+The service automatically loads `[settings]` from `config.ini` beside
+`main.py`. Edit that file for normal use. Relative paths in it are resolved
+from the configuration file's directory, not the current terminal directory.
+Empty optional path values retain automatic discovery or built-in defaults.
+
+Use `--config /path/to/another.ini` to load another file. Explicit command-line
+arguments override the file. The complete precedence order is command line,
+environment variables, configuration file, then built-in defaults.
+
+All command-line overrides are available with `python3 main.py --help` on
+Linux or `py -3 .\main.py --help` on Windows. INI setting names use underscores
+instead of the option's leading dashes, as shown in the included file.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
+| `--config` | `./config.ini` | Load settings from another INI file |
 | `--port` | `9696` | Loopback HTTP port |
 | `--max-height` | `1080` | Maximum selected video height |
 | `--max-fps` | `30` | Maximum selected video frame rate |
@@ -301,6 +313,9 @@ All options are available with `python3 main.py --help` on Linux or
 | `--yt-dlp` | Linux: `~/.local/bin/yt-dlp` | Path to the `yt-dlp` executable |
 | `--ffmpeg` | Linux: `/usr/bin/ffmpeg` | Path to the FFmpeg executable |
 | `--cookies` | `./youtube_cookies.txt` | Optional Netscape-format cookie file; omitted when absent |
+| `--vrchat-yt-dlp` | Automatic | Override discovery of VRChat's bundled `yt-dlp.exe` |
+| `--stub` | `./yt-dlp-stub/publish/yt-dlp-stub.exe` | Interception stub executable |
+| `--backup` | Beside VRChat's `yt-dlp.exe` | Override the interception backup path |
 | `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
 The cache size, grace period, cleanup interval, and active-job timeout can also

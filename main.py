@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import logging
 import ntpath
@@ -34,6 +35,7 @@ DEFAULT_YTDLP = Path("~/.local/bin/yt-dlp").expanduser()
 DEFAULT_STUB = Path(__file__).parent / "yt-dlp-stub" / "publish" / "yt-dlp-stub.exe"
 DEFAULT_FFMPEG = Path("/usr/bin/ffmpeg")
 DEFAULT_COOKIES = Path(__file__).parent / "youtube_cookies.txt"
+DEFAULT_CONFIG = Path(__file__).parent / "config.ini"
 DEFAULT_CACHE_LIMIT_BYTES = 200 * 1024**2
 DEFAULT_CACHE_GRACE_SECONDS = 10 * 60
 DEFAULT_CACHE_CLEANUP_INTERVAL = 5 * 60
@@ -1633,8 +1635,110 @@ def size_bytes(value: str) -> int:
     return parsed
 
 
+CONFIG_KEYS = {
+    "vrchat_yt_dlp",
+    "stub",
+    "backup",
+    "port",
+    "max_height",
+    "max_fps",
+    "segment_seconds",
+    "startup_wait",
+    "cache_max_size",
+    "cache_grace_minutes",
+    "cache_cleanup_interval",
+    "job_idle_timeout",
+    "cache_dir",
+    "yt_dlp",
+    "ffmpeg",
+    "cookies",
+    "log_level",
+}
+CONFIG_PATH_KEYS = {
+    "vrchat_yt_dlp",
+    "stub",
+    "backup",
+    "cache_dir",
+    "yt_dlp",
+    "ffmpeg",
+    "cookies",
+}
+
+
+def load_config(path: Path, required: bool = False) -> dict[str, Any]:
+    path = path.expanduser().resolve()
+    try:
+        with path.open("r", encoding="utf-8") as config_file:
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.read_file(config_file)
+    except FileNotFoundError:
+        if required:
+            raise ResolveError(f"Configuration file does not exist: {path}")
+        return {}
+    except (OSError, configparser.Error) as exc:
+        raise ResolveError(f"Could not read configuration file {path}: {exc}") from exc
+
+    unexpected_sections = set(parser.sections()) - {"settings"}
+    if unexpected_sections:
+        names = ", ".join(sorted(unexpected_sections))
+        raise ResolveError(f"Unknown configuration section(s) in {path}: {names}")
+    if not parser.has_section("settings"):
+        raise ResolveError(f"Configuration file is missing a [settings] section: {path}")
+
+    values: dict[str, Any] = {}
+    for raw_name, raw_value in parser.items("settings"):
+        name = raw_name.strip().replace("-", "_")
+        if name not in CONFIG_KEYS:
+            raise ResolveError(f"Unknown configuration setting in {path}: {raw_name}")
+        value = raw_value.strip()
+        if not value:
+            continue
+        if name in CONFIG_PATH_KEYS:
+            configured_path = Path(value).expanduser()
+            if not configured_path.is_absolute():
+                configured_path = path.parent / configured_path
+            values[name] = configured_path.resolve()
+            continue
+        try:
+            if name in {"max_height", "max_fps", "segment_seconds"}:
+                values[name] = positive_int(value)
+            elif name == "port":
+                values[name] = int(value)
+            elif name in {
+                "startup_wait",
+                "cache_grace_minutes",
+                "cache_cleanup_interval",
+                "job_idle_timeout",
+            }:
+                values[name] = nonnegative_float(value)
+            elif name == "cache_max_size":
+                values[name] = size_bytes(value)
+            elif name == "log_level":
+                level = value.upper()
+                if level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+                    raise ValueError("use DEBUG, INFO, WARNING, or ERROR")
+                values[name] = level
+        except (ValueError, argparse.ArgumentTypeError) as exc:
+            raise ResolveError(
+                f"Invalid value for {raw_name} in {path}: {value!r} ({exc})"
+            ) from exc
+    return values
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    config_argument_parser = argparse.ArgumentParser(add_help=False)
+    config_argument_parser.add_argument("--config", type=Path)
+    config_argument, _unknown = config_argument_parser.parse_known_args(arguments)
+    config_path = (config_argument.config or DEFAULT_CONFIG).expanduser().resolve()
+
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=config_path,
+        help=f"settings file (default: {DEFAULT_CONFIG})",
+    )
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--patch", action="store_true", help="back up and patch VRChat's yt-dlp.exe")
     action.add_argument("--restore", action="store_true", help="restore VRChat's yt-dlp.exe from backup")
@@ -1686,7 +1790,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ffmpeg", type=Path, default=DEFAULT_FFMPEG)
     parser.add_argument("--cookies", type=Path, default=DEFAULT_COOKIES)
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
-    args = parser.parse_args(argv)
+    try:
+        config_defaults = load_config(config_path, required=config_argument.config is not None)
+    except ResolveError as exc:
+        parser.error(str(exc))
+    environment_defaults = {}
+    environment_variables = {
+        "cache_max_size": "VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_MAX_SIZE",
+        "cache_grace_minutes": "VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_GRACE_MINUTES",
+        "cache_cleanup_interval": "VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_CLEANUP_INTERVAL",
+        "job_idle_timeout": "VRCHAT_VIDEO_PLAYER_ENHANCER_JOB_IDLE_TIMEOUT",
+    }
+    for setting, variable in environment_variables.items():
+        if variable in os.environ:
+            environment_defaults[setting] = os.environ[variable]
+    effective_defaults = {**config_defaults, **environment_defaults}
+    parser.set_defaults(**effective_defaults)
+    args = parser.parse_args(arguments)
+    args.config = args.config.expanduser().resolve()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
     return args
@@ -1717,6 +1838,8 @@ def main(argv: list[str] | None = None) -> int:
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    if args.config.is_file():
+        LOGGER.info("Loaded configuration from %s", args.config)
     if args.patch or args.restore:
         try:
             target = args.vrchat_yt_dlp or discover_vrchat_ytdlp_path()
