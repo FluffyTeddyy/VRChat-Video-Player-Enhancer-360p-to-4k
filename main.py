@@ -929,7 +929,7 @@ class FfmpegRemuxer:
             "-hls_list_size",
             "0",
             "-hls_playlist_type",
-            "event",
+            "vod",
             "-hls_flags",
             "temp_file",
             "-hls_segment_filename",
