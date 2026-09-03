@@ -729,11 +729,13 @@ class YtDlpResolver:
         max_height: int,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         max_fps: int = 30,
+        best_video: bool = False,
     ) -> None:
         self.executable = executable
         self.cookies = cookies
         self.max_height = max_height
         self.max_fps = max_fps
+        self.best_video = best_video
         self.run = run
 
     def _resolve_once(
@@ -741,11 +743,17 @@ class YtDlpResolver:
         expected_video_id: str,
         cookie_path: Path | None,
     ) -> DirectStreams:
-        format_selector = (
-            f"bestvideo[protocol^=http][vcodec^=avc1][height<={self.max_height}]"
-            f"[fps<={self.max_fps}]"
-            "+bestaudio[protocol^=http][acodec^=mp4a]"
-        )
+        if self.best_video:
+            format_selector = (
+                "bestvideo[protocol^=http][vcodec^=avc1]"
+                "+bestaudio[protocol^=http][acodec^=mp4a]"
+            )
+        else:
+            format_selector = (
+                f"bestvideo[protocol^=http][vcodec^=avc1][height<={self.max_height}]"
+                f"[fps<={self.max_fps}]"
+                "+bestaudio[protocol^=http][acodec^=mp4a]"
+            )
         command = [
             str(self.executable),
             "--no-playlist",
@@ -1664,6 +1672,15 @@ def size_bytes(value: str) -> int:
     return parsed
 
 
+def boolean_value(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("use true or false")
+
+
 CONFIG_KEYS = {
     "vrchat_yt_dlp",
     "stub",
@@ -1671,6 +1688,7 @@ CONFIG_KEYS = {
     "port",
     "max_height",
     "max_fps",
+    "best_video",
     "segment_seconds",
     "startup_wait",
     "cache_max_size",
@@ -1731,6 +1749,8 @@ def load_config(path: Path, required: bool = False) -> dict[str, Any]:
         try:
             if name in {"max_height", "max_fps", "segment_seconds"}:
                 values[name] = positive_int(value)
+            elif name == "best_video":
+                values[name] = boolean_value(value)
             elif name == "port":
                 values[name] = int(value)
             elif name in {
@@ -1781,6 +1801,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=9696)
     parser.add_argument("--max-height", type=positive_int, default=1080)
     parser.add_argument("--max-fps", type=positive_int, default=30)
+    parser.add_argument(
+        "--best-video",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="select the best compatible video without max-height or max-FPS limits",
+    )
     parser.add_argument("--segment-seconds", type=positive_int, default=6)
     parser.add_argument(
         "--startup-wait",
@@ -1825,6 +1851,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(str(exc))
     environment_defaults = {}
     environment_variables = {
+        "best_video": "VRCHAT_VIDEO_PLAYER_ENHANCER_BEST_VIDEO",
         "cache_max_size": "VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_MAX_SIZE",
         "cache_grace_minutes": "VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_GRACE_MINUTES",
         "cache_cleanup_interval": "VRCHAT_VIDEO_PLAYER_ENHANCER_CACHE_CLEANUP_INTERVAL",
@@ -1832,7 +1859,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     }
     for setting, variable in environment_variables.items():
         if variable in os.environ:
-            environment_defaults[setting] = os.environ[variable]
+            if setting == "best_video":
+                try:
+                    environment_defaults[setting] = boolean_value(os.environ[variable])
+                except argparse.ArgumentTypeError as exc:
+                    parser.error(f"Invalid {variable}: {exc}")
+            else:
+                environment_defaults[setting] = os.environ[variable]
     effective_defaults = {**config_defaults, **environment_defaults}
     parser.set_defaults(**effective_defaults)
     args = parser.parse_args(arguments)
@@ -1929,6 +1962,7 @@ def main(argv: list[str] | None = None) -> int:
         args.cookies,
         args.max_height,
         max_fps=args.max_fps,
+        best_video=args.best_video,
     )
     passthrough = YtDlpPassthrough(args.yt_dlp, args.cookies)
     remuxer = FfmpegRemuxer(args.ffmpeg, args.segment_seconds)

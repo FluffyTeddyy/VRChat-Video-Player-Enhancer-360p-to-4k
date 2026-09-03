@@ -303,6 +303,7 @@ instead of the option's leading dashes, as shown in the included file.
 | `--port` | `9696` | Loopback HTTP port |
 | `--max-height` | `1080` | Maximum selected video height |
 | `--max-fps` | `30` | Maximum selected video frame rate |
+| `--best-video` / `--no-best-video` | `false` | Ignore height/FPS limits and select the best compatible H.264 video |
 | `--segment-seconds` | `6` | Steady-state HLS segment duration; the initial segment targets 1 second |
 | `--startup-wait` | `10` | Seconds to wait for the first playlist per resolve request; use `0` to return immediately |
 | `--cache-max-size` (`--cache-limit`) | `10G` | Maximum cache size; accepts values such as `200M` or `10G` |
