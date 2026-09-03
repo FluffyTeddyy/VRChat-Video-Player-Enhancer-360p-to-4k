@@ -1149,14 +1149,15 @@ class JobManager:
                 return self._jobs.setdefault(video_id, job)
         return None
 
-    def record_access(self, video_id: str) -> None:
+    def record_access(self, video_id: str, *, persist: bool = True) -> None:
         with self._lock:
             job = self._jobs.get(video_id)
         if job:
             with job.condition:
                 if job.state in ACTIVE_STATES:
                     job.last_hls_access = time.monotonic()
-        self.cache.touch(video_id)
+        if persist:
+            self.cache.touch(video_id)
 
     def cache_status(self) -> dict[str, Any]:
         with self._lock:
@@ -1566,6 +1567,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         if parts[1] == "stream.m3u8" and not path.is_file():
             deadline = time.monotonic() + HLS_PLAYLIST_WAIT_SECONDS
             while time.monotonic() < deadline and not path.is_file():
+                # Keep a slow first-segment download alive while this client is
+                # actively waiting for its playlist.
+                self.server.manager.record_access(parts[0], persist=False)
                 job = self.server.manager.get(parts[0])
                 if not job or job.state not in ACTIVE_STATES:
                     break
