@@ -259,6 +259,10 @@ can interfere with one another. Normal server startup
 keeps the patch active only for the service lifetime and reapplies it if VRChat
 refreshes its bundled executable during startup. The stub forwards YouTube requests to
 `/api/getvideo` and passes non-YouTube requests through the configured `yt-dlp`.
+For non-YouTube links, the service briefly probes HTTP redirects (up to five
+hops, without downloading media). If any redirect target is YouTube, that URL
+is sent through the local HLS pipeline; links that stay elsewhere continue
+through normal yt-dlp passthrough.
 
 The playlist is published as an HLS event while FFmpeg is running and ends with
 `#EXT-X-ENDLIST` when complete. Completed videos are reused from the cache;

@@ -17,12 +17,14 @@ import sys
 import threading
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Protocol
-from urllib.parse import parse_qs, unquote, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 
 LOGGER = logging.getLogger("vrchat_video_player_enhancer")
@@ -846,6 +848,13 @@ class FfmpegRemuxer:
             raise ResolveError(f"Could not start ffmpeg: {exc}") from exc
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Expose each redirect target instead of following it automatically."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class YtDlpPassthrough:
     """Resolve non-YouTube URLs with a controlled real yt-dlp invocation."""
 
@@ -858,6 +867,60 @@ class YtDlpPassthrough:
         self.executable = executable
         self.cookies = cookies
         self.run = run
+
+    @staticmethod
+    def follow_http_redirect(url: str) -> str | None:
+        """Inspect a bounded chain of HTTP redirects without downloading media."""
+        current_url = url
+        seen = {current_url}
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+
+        def probe(method: str) -> str | None:
+            headers = {"User-Agent": "VRChat-Video-Player-Enhancer/1.0"}
+            if method == "GET":
+                headers["Range"] = "bytes=0-0"
+            request = urllib.request.Request(current_url, headers=headers, method=method)
+            try:
+                response = opener.open(request, timeout=3)
+            except urllib.error.HTTPError as exc:
+                if 300 <= exc.code < 400:
+                    location = exc.headers.get("Location")
+                    exc.close()
+                    if location:
+                        return urljoin(current_url, location)
+                raise
+            except (urllib.error.URLError, OSError, ValueError):
+                raise
+            else:
+                response.close()
+                return None
+
+        for _hop in range(5):
+            try:
+                target_url = probe("HEAD")
+            except urllib.error.HTTPError as exc:
+                status = exc.code
+                exc.close()
+                if status not in {400, 403, 405, 501}:
+                    return None
+                try:
+                    target_url = probe("GET")
+                except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError) as get_exc:
+                    if isinstance(get_exc, urllib.error.HTTPError):
+                        get_exc.close()
+                    return None
+            except (urllib.error.URLError, OSError, ValueError):
+                return None
+
+            if not target_url:
+                return None
+            if is_youtube_url(target_url):
+                return target_url
+            if target_url in seen:
+                return None
+            seen.add(target_url)
+            current_url = target_url
+        return None
 
     def __call__(self, url: str, *, avpro: bool, source: str) -> str:
         command = [str(self.executable), "--no-playlist"]
@@ -1233,6 +1296,15 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         url = urls[0].strip()
         avpro = avpro_values[0].lower() == "true"
         source = source_values[0].lower()
+
+        redirected_url: str | None = None
+        if not is_youtube_url(url) and self.server.passthrough is not None:
+            redirect_detector = getattr(self.server.passthrough, "follow_http_redirect", None)
+            if callable(redirect_detector):
+                redirected_url = redirect_detector(url)
+        if redirected_url:
+            LOGGER.info("Interception followed redirect to YouTube: %s -> %s", url, redirected_url)
+            url = redirected_url
 
         if is_youtube_url(url):
             try:
