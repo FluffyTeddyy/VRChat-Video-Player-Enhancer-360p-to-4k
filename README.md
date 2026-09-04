@@ -271,13 +271,13 @@ arguments unchanged. Non-YouTube requests therefore do not contact this
 service, run redirect probes, copy cookies, or receive format changes. Direct
 `.m3u8` URLs are part of that untouched normal path.
 
-The playlist is published with HLS VOD metadata while FFmpeg is running and
-ends with `#EXT-X-ENDLIST` when complete, so clients can expose a duration and
-seek timeline instead of classifying it as a live stream. FFmpeg atomically
-rewrites the same playlist as new segments arrive; this is normal HLS polling
-behavior, not a new video for each segment. The local HLS endpoint waits
-briefly for the initial playlist so clients do not see a transient missing-file
-response. Completed videos are
+FFmpeg publishes an HLS event playlist progressively, while the local HLS
+endpoint advertises it as VOD to clients. This lets AVPro expose a duration and
+seek timeline without waiting for the complete download. The playlist ends with
+`#EXT-X-ENDLIST` when complete. FFmpeg atomically rewrites the same playlist as
+new segments arrive; this is normal HLS polling behavior, not a new video for
+each segment. The local HLS endpoint waits briefly for the initial playlist so
+clients do not see a transient missing-file response. Completed videos are
 reused from the cache while the service is running; stale partial output is
 replaced on the next request. The cache is cleared when the service exits. An
 active download is cancelled after 30 seconds without a playlist or segment

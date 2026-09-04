@@ -929,7 +929,7 @@ class FfmpegRemuxer:
             "-hls_list_size",
             "0",
             "-hls_playlist_type",
-            "vod",
+            "event",
             "-hls_flags",
             "temp_file",
             "-hls_segment_filename",
@@ -1583,7 +1583,6 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 return
         try:
             stat = path.stat()
-            file_handle = path.open("rb")
         except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "HLS file is not available yet"}, send_body)
             return
@@ -1593,9 +1592,22 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             if path.suffix == ".m3u8"
             else "video/mp2t"
         )
+        if path.suffix == ".m3u8":
+            try:
+                body = path.read_bytes()
+            except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "HLS file is not available yet"}, send_body)
+                return
+            # FFmpeg must use EVENT mode to publish the playlist progressively.
+            # Advertise it as VOD to clients so AVPro exposes duration and seek.
+            body = body.replace(b"#EXT-X-PLAYLIST-TYPE:EVENT", b"#EXT-X-PLAYLIST-TYPE:VOD")
+            stat_size = len(body)
+        else:
+            file_handle = path.open("rb")
+            stat_size = stat.st_size
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(stat.st_size))
+        self.send_header("Content-Length", str(stat_size))
         self.send_header(
             "Cache-Control",
             "no-store" if path.suffix == ".m3u8" else "public, max-age=31536000, immutable",
@@ -1603,12 +1615,16 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             if send_body:
-                while chunk := file_handle.read(1024 * 256):
-                    self.wfile.write(chunk)
+                if path.suffix == ".m3u8":
+                    self.wfile.write(body)
+                else:
+                    while chunk := file_handle.read(1024 * 256):
+                        self.wfile.write(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
-            file_handle.close()
+            if path.suffix != ".m3u8":
+                file_handle.close()
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any], send_body: bool) -> None:
         body = (json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n").encode()
